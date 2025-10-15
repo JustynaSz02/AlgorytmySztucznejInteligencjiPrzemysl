@@ -1,1 +1,1 @@
-# AlgorytmySztucznejInteligencjiPrzemysl
+

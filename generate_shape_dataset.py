@@ -2,14 +2,11 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon, Ellipse
 import numpy as np
 from PIL import Image
-import os
-import cv2
-import io
-import random
+import os, io, cv2, random, argparse
 
+# ------------------------ Narzędzia ------------------------
 
 def get_img_from_fig(fig, dpi=None):
-    """Konwertuje matplotlib figure na obraz numpy array"""
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=dpi, bbox_inches='tight', pad_inches=0)
     buf.seek(0)
@@ -19,159 +16,184 @@ def get_img_from_fig(fig, dpi=None):
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     return img
 
+def rotate(coords, deg):
+    a = np.radians(deg)
+    R = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+    return coords @ R.T
 
-def get_coords(n):
-    """Generuje współrzędne dla wielokąta o n bokach"""
-    t = np.arange(0, 360 + (360 / n), 360 / n)
-    x = 10 * np.sin(np.radians(t))
-    y = 10 * np.cos(np.radians(t))
-    return x, y
+def shear(coords, shx=0.0, shy=0.0):
+    S = np.array([[1, shx],[shy, 1]])
+    return coords @ S.T
 
+def scale_xy(coords, sx=1.0, sy=1.0):
+    S = np.array([[sx,0],[0,sy]])
+    return coords @ S.T
 
-def rotate_coords(coords, angle_degrees):
-    """Obraca współrzędne o podany kąt w stopniach"""
-    angle_rad = np.radians(angle_degrees)
-    rotation_matrix = np.array([
-        [np.cos(angle_rad), -np.sin(angle_rad)],
-        [np.sin(angle_rad), np.cos(angle_rad)]
-    ])
-    return coords @ rotation_matrix.T
+def square_coords(side=1.0):
+    # kwadrat jednostkowy (zamknięty)
+    h = side/2
+    pts = np.array([[-h,-h],[h,-h],[h,h],[-h,h]])
+    return pts
 
+def random_bg(h, w):
+    """Zwraca tło (h,w,3) typu uint8.
+       Losuje typ: solid-light / solid-dark / solid-color / gradient / noise
+    """
+    choice = random.choice(["solid_light","solid_dark","solid_color","gradient","noise"])
+    if choice=="solid_light":
+        v = random.randint(210,255)
+        bg = np.full((h,w,3), v, np.uint8)
+    elif choice=="solid_dark":
+        v = random.randint(0,45)
+        bg = np.full((h,w,3), v, np.uint8)
+    elif choice=="solid_color":
+        bg = np.array([random.randint(80,255),
+                       random.randint(80,255),
+                       random.randint(80,255)], np.uint8)
+        bg = np.full((h,w,3), bg, np.uint8)
+    elif choice=="gradient":
+        x = np.linspace(0,1,w, dtype=np.float32)
+        c1 = np.array([random.randint(0,255) for _ in range(3)], dtype=np.float32)
+        c2 = np.array([random.randint(0,255) for _ in range(3)], dtype=np.float32)
+        row = (c1[None,:]*(1-x[:,None]) + c2[None,:]*x[:,None]).astype(np.uint8)
+        bg = np.repeat(row[None,:,:], h, axis=0)
+    else:  # noise
+        bg = np.random.randint(0,255,(h,w,3), dtype=np.uint8)
+        k = random.choice([3,5,7])
+        bg = cv2.GaussianBlur(bg, (k,k), sigmaX=0)
+    return bg
 
-def generate_shape_images():
-    """Generuje dataset kształtów: 6 kategorii x 50 obrazów"""
-    
-    # Parametry
-    figsize = 4  # Rozmiar w calach
-    dpi = 224 / figsize
-    alpha = 0.6
-    num_images_per_category = 10
-    
-    # Szerokość obrazu w jednostkach matplotlib (odpowiednik figsize)
-    image_width = figsize
-    
-    # Szerokość kształtu = 1/4 szerokości obrazu
-    shape_width = image_width / 2
-    
-    # Zakres osi - ustawiamy tak, aby obraz był wycentrowany
-    axis_range = figsize / 2
-    axis_min = -axis_range
-    axis_max = axis_range
-    
-    # Definicje kategorii
-    colors = {
-        'r': 'red',      # czerwony
-        'g': 'green',    # zielony
-        'b': 'blue'      # niebieski
-    }
-    
-    shapes = {
-        4: 'square',     # kwadrat
-        'round': 'circle'  # koło
-    }
-    
-    # Główny folder na obrazy
-    output_dir = "data/test"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    
-    # Generowanie obrazów dla każdej kategorii
-    for color_code, color_name in colors.items():
-        for shape_code, shape_name in shapes.items():
-            # Tworzymy folder dla kategorii (np. "red_circle", "green_square")
-            category_name = f"{color_name}_{shape_name}"
-            category_dir = os.path.join(output_dir, category_name)
-            
-            if not os.path.exists(category_dir):
-                os.makedirs(category_dir)
-            
-            print(f"Generowanie obrazów dla: {category_name}")
-            
-            # Generujemy 50 obrazów z losowymi parametrami
-            for idx in range(num_images_per_category):
-                # Losowa rotacja z zakresu -90 do +90 stopni
-                rotation = random.uniform(-90, 90)
-                
-                # Tworzymy figurę
+def paste_alpha(base_rgb, overlay_rgb, mask_alpha):
+    """Łączy overlay (RGB) z bazą (RGB) wg maski alfa w [0,1]."""
+    a = mask_alpha[...,None]
+    out = (overlay_rgb*a + base_rgb*(1-a)).astype(np.uint8)
+    return out
+
+# ------------------------ Generator ------------------------
+
+def generate_dataset(per_class=100, splits=(70,15,15), out_dir="data",
+                     img_size=224, seed=42):
+    random.seed(seed); np.random.seed(seed)
+    assert sum(splits)==100, "splits muszą sumować się do 100 (np. 70 15 15)"
+
+    # Klasy: 3 kolory × 2 kształty
+    color_map = {"red":(255,0,0),"green":(0,170,0),"blue":(0,120,255)}
+    shapes = ["circle","square"]
+    classes = [f"{c}_{s}" for c in color_map for s in shapes]
+
+    # Przygotuj katalogi
+    for split_name in ["train","val","test"]:
+        for cls in classes:
+            os.makedirs(os.path.join(out_dir, split_name, cls), exist_ok=True)
+
+    # Ile obrazów na split
+    n_train = per_class * splits[0] // 100
+    n_val   = per_class * splits[1] // 100
+    n_test  = per_class - n_train - n_val
+    counts = {"train":n_train, "val":n_val, "test":n_test}
+
+    # Parametry figury (rysujemy matplotlib → PNG → numpy)
+    figsize = 4
+    dpi = img_size/figsize
+    axis_min, axis_max = -figsize/2, figsize/2
+    shape_base = figsize/2    # bazowa szerokość kształtu
+
+    for cls in classes:
+        color_name, shape_name = cls.split("_")
+        color_rgb = color_map[color_name]
+
+        print(f"[{cls}] train={counts['train']} val={counts['val']} test={counts['test']}")
+
+        for split_name, n_imgs in counts.items():
+            for i in range(n_imgs):
+                # 1) rysujemy tło jako imshow
                 fig, ax = plt.subplots(figsize=(figsize, figsize))
-                
-                # Generujemy kształt
-                if shape_code == 'round':
-                    # Koło: szerokość = shape_width
-                    # Promień koła w jednostkach współrzędnych
-                    circle_radius = shape_width / 2
-                    
-                    # Maksymalna pozycja środka, aby koło nie wychodziło poza obszar
-                    max_pos = axis_max - circle_radius
-                    min_pos = axis_min + circle_radius
-                    
-                    # Losowa pozycja środka koła
-                    pos_x = random.uniform(min_pos, max_pos)
-                    pos_y = random.uniform(min_pos, max_pos)
-                    
-                    # Tworzymy koło
-                    poly = Ellipse(xy=(pos_x, pos_y), width=shape_width, height=shape_width, 
-                                 fc=color_code, alpha=alpha)
-                    ax.add_patch(poly)
-                else:
-                    # Kwadrat (n=4) z losową rotacją i pozycją
-                    x, y = get_coords(shape_code)
-                    coords = np.c_[x, y]
-                    
-                    # Normalizujemy współrzędne kwadratu (obecnie są w zakresie ~-10 do 10)
-                    # Chcemy, aby kwadrat miał szerokość shape_width
-                    # Współrzędne z get_coords mają rozmiar około 20 (od -10 do 10)
-                    # Więc skalujemy do shape_width
-                    coords_normalized = coords / 20.0 * shape_width
-                    
-                    # Obracamy współrzędne
-                    coords_rotated = rotate_coords(coords_normalized, rotation)
-                    
-                    # Obliczamy maksymalne przesunięcie kwadratu (w przypadku rotacji do 45 stopni)
-                    # Dla kwadratu o szerokości shape_width, przekątna po rotacji może być sqrt(2) * shape_width
-                    # Więc maksymalna odległość od środka do wierzchołka to sqrt(2) * shape_width / 2
-                    max_distance = (shape_width / 2) * np.sqrt(2)
-                    
-                    # Maksymalna pozycja środka, aby kwadrat nie wychodził poza obszar
-                    max_pos = axis_max - max_distance
-                    min_pos = axis_min + max_distance
-                    
-                    # Losowa pozycja środka kwadratu
-                    pos_x = random.uniform(min_pos, max_pos)
-                    pos_y = random.uniform(min_pos, max_pos)
-                    
-                    # Przesuwamy do losowej pozycji
-                    coords_final = coords_rotated + np.array([pos_x, pos_y])
-                    
-                    poly = Polygon(coords_final, fc=color_code, alpha=alpha)
-                    ax.add_patch(poly)
-                
-                # Konfiguracja osi - ustawiamy zakres tak, aby obraz był wycentrowany
-                ax.axis('image')
-                ax.axis('off')
-                ax.set_xlim(axis_min, axis_max)
-                ax.set_ylim(axis_min, axis_max)
-                
-                # Tight layout
-                fig.tight_layout(pad=0)
-                fig.canvas.draw()
-                
-                # Konwersja na obraz
-                img = get_img_from_fig(fig, dpi=dpi)
-                plt.close(fig)  # Zamknij figurę, aby zwolnić pamięć
-                
-                # Zapisujemy obraz
-                img_pil = Image.fromarray(img)
-                filename = f"{category_name}_{idx:03d}.png"
-                filepath = os.path.join(category_dir, filename)
-                img_pil.save(filepath)
-            
-            print(f"  ✓ Wygenerowano {num_images_per_category} obrazów dla {category_name}")
-    
-    print(f"\n✓ Dataset wygenerowany w folderze: {output_dir}")
-    print(f"  Łącznie: 6 kategorii x {num_images_per_category} obrazów = {6 * num_images_per_category} obrazów")
+                ax.axis("off"); ax.set_xlim(axis_min,axis_max); ax.set_ylim(axis_min,axis_max)
 
+                # generuj tło i narysuj
+                bg = random_bg(img_size, img_size)
+                ax.imshow(bg, extent=(axis_min,axis_max,axis_min,axis_max))
+
+                # 2) kształt + losowe zniekształcenia
+                alpha = random.uniform(0.7, 1.0)
+
+                if shape_name=="circle":
+                    # elipsa (zniekształcony „okrąg”)
+                    sx = shape_base * random.uniform(0.35, 0.55)   # średnica x
+                    sy = shape_base * random.uniform(0.35, 0.55)   # średnica y
+                    rot = random.uniform(0, 180)
+
+                    # bezpieczne pozycjonowanie (część krawędzi może wyjść minimalnie – wygląda naturalniej)
+                    margin = max(sx, sy)/2 + 0.2
+                    cx = random.uniform(axis_min+margin, axis_max-margin)
+                    cy = random.uniform(axis_min+margin, axis_max-margin)
+
+                    patch = Ellipse((cx,cy), width=sx, height=sy,
+                                    angle=rot, fc=np.array(color_rgb)/255, ec=None, alpha=alpha)
+                    ax.add_patch(patch)
+
+                else:  # square
+                    side = shape_base * random.uniform(0.55, 0.75)
+                    pts = square_coords(side)
+
+                    # jitter wierzchołków (do 10% boku)
+                    jitter = side*0.10
+                    pts = pts + np.random.uniform(-jitter, jitter, pts.shape)
+
+                    # skala niesymetryczna i shear
+                    sx = random.uniform(0.85, 1.15)
+                    sy = random.uniform(0.85, 1.15)
+                    shx = random.uniform(-0.25, 0.25)
+                    shy = random.uniform(-0.25, 0.25)
+                    rot = random.uniform(-90, 90)
+
+                    pts = scale_xy(pts, sx, sy)
+                    pts = shear(pts, shx, shy)
+                    pts = rotate(pts, rot)
+
+                    # bezpieczny margines dla przesunięcia
+                    extent = np.max(np.linalg.norm(pts, axis=1))
+                    margin = extent + 0.2
+                    cx = random.uniform(axis_min+margin, axis_max-margin)
+                    cy = random.uniform(axis_min+margin, axis_max-margin)
+
+                    pts = pts + np.array([cx, cy])
+                    patch = Polygon(pts, closed=True, fc=np.array(color_rgb)/255, ec=None, alpha=alpha)
+                    ax.add_patch(patch)
+
+                # 3) czasem mała „niedoskonałość” (szum/rozmazanie całości)
+                fig.canvas.draw()
+                img = get_img_from_fig(fig, dpi=dpi)
+                plt.close(fig)
+
+                # 10% – szum Gaussa
+                if random.random() < 0.10:
+                    noise = np.random.normal(0, 10, img.shape).astype(np.int16)
+                    img = np.clip(img.astype(np.int16)+noise, 0, 255).astype(np.uint8)
+
+                # 15% – lekki blur
+                if random.random() < 0.15:
+                    k = random.choice([3,5])
+                    img = cv2.GaussianBlur(img, (k,k), 0)
+
+                # 4) zapis
+                cls_dir = os.path.join(out_dir, split_name, cls)
+                fname = f"{cls}_{i:04d}.png"
+                Image.fromarray(img).save(os.path.join(cls_dir, fname))
+
+    print("\n✓ Gotowe! Zbiory zapisane w:", os.path.abspath(out_dir))
+
+# ------------------------ CLI ------------------------
 
 if __name__ == "__main__":
-    generate_shape_images()
+    ap = argparse.ArgumentParser(description="Generator datasetu kształtów z losowymi zniekształceniami i tłami.")
+    ap.add_argument("--per-class", type=int, default=100, help="liczba obrazów na klasę (łącznie train+val+test)")
+    ap.add_argument("--splits", nargs=3, type=int, default=[70,15,15], metavar=("TRAIN","VAL","TEST"),
+                    help="procentowe podziały (muszą sumować się do 100)")
+    ap.add_argument("--out", type=str, default="data", help="katalog wyjściowy (powstaną podfoldery train/val/test)")
+    ap.add_argument("--img-size", type=int, default=224, help="rozmiar obrazu (kwadrat)")
+    ap.add_argument("--seed", type=int, default=42, help="ziarno losowe")
+    args = ap.parse_args()
 
+    generate_dataset(per_class=args.per_class, splits=tuple(args.splits),
+                     out_dir=args.out, img_size=args.img_size, seed=args.seed)

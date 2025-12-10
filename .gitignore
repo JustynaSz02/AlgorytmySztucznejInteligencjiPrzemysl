@@ -41,16 +41,14 @@ venv.bak/
 *.ipynb
 
 # Modele ML (można odkomentować jeśli nie chcesz commitować modeli)
-models/*.h5
-models/*.pb
-models/*.tflite
-models/*.pkl
-models/checkpoints/
+# models/*.h5
+# models/*.pb
+# models/*.tflite
+# models/*.pkl
+# models/checkpoints/
 
-# Dane (opcjonalnie - odkomentuj jeśli nie chcesz commitować danych)
-# data/
-# data/train/
-# data/test/
+# Dane - cały folder data jest ignorowany
+data/
 
 # Logi i cache
 *.log
@@ -60,8 +58,8 @@ models/checkpoints/
 *.pyc
 
 # Wizualizacje (opcjonalnie)
-models/*.png
-models/training_log.csv
+# models/*.png
+# models/training_log.csv
 
 # Systemy operacyjne
 Thumbs.db

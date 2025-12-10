@@ -1,0 +1,150 @@
+\input{header}
+\usepackage{float}
+
+\begin{document}
+
+\frontpage{%
+    Algorytmy sztucznej inteligencji w Przemyśle 4.0
+}{%
+    Informatyczne sytemy automatyki - IPS
+}{%
+    Środa 17:05
+}{-}{-}{%
+   Dawid Różański 263524
+   Justyna Szulc 263502
+}{%
+}{
+    \today
+}
+
+
+
+
+
+\pagestyle{empty}
+\section{Cel projektu}
+
+Celem projektu jest opracowanie \textbf{systemu automatycznego sortowania obiektów} na podstawie ich kształtu i koloru, z wykorzystaniem metod \textbf{sztucznej inteligencji} opartych na \textbf{głębokim uczeniu} (\emph{deep learning}). 
+System jest projektowany z myślą o zastosowaniach w ramach koncepcji \textbf{Przemysłu 4.0}, w których automatyzacja procesów rozpoznawania, klasyfikacji i sortowania elementów przyczynia się do zwiększenia efektywności produkcji oraz redukcji kosztów operacyjnych.
+
+\subsection{Zakres funkcjonalności}
+
+W ramach projektu opracowano zestawy danych przeznaczone do trenowania modeli klasyfikujących obiekty geometryczne według ich koloru i kształtu. 
+Dataset obejmuje \textbf{6 klas obiektów}:
+\begin{itemize}
+    \item czerwone, zielone i niebieskie koła,
+    \item czerwone, zielone i niebieskie kwadraty.
+\end{itemize}
+
+Każdy obraz przedstawia pojedynczy obiekt geometryczny umieszczony na tle o losowych parametrach, co zapewnia zróżnicowanie wizualne i zwiększa odporność przyszłego modelu na zmienność danych wejściowych.
+
+\subsection{Metodyka działania}
+W ramach projektu przygotowano i przetworzono dane uczące zgodnie z poniższymi etapami:
+
+\subsubsection{Przygotowanie danych}
+Przygotowanie danych zostało zrealizowane w sposób w pełni zautomatyzowany poprzez skrypt \texttt{generate\_shape\_dataset.py}. Proces generowania obejmuje:
+\begin{itemize}
+    \item generowanie syntetycznego zbioru danych zawierającego obrazy figur geometrycznych z wbudowanymi zniekształceniami,
+    \item automatyczny podział danych na zbiory: treningowy (100 obrazów na kategorię), walidacyjny (20 obrazów) i testowy (20 obrazów),
+    \item wbudowaną augmentację danych obejmującą: zaszumienie gaussowskie, zniekształcenia perspektywiczne, rozmycie gaussowskie oraz zmiany jasności i kontrastu,
+    \item generowanie losowego tła (szum gaussowski, gradienty liniowe i radialne, jednolite kolory),
+    \item losowe parametry figur: rotacja (-180° do +180°), pozycja, rozmiar oraz deformacje (dla kwadratów dodatkowe zniekształcenia trapezowe i affine).
+\end{itemize}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=1\textwidth]{dane/dane1.png}
+    \caption{Przykładowe obrazy z wygenerowanego datasetu niebieskich kół}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{dane/dane2.png}
+    \caption{Przykładowe obrazy z wygenerowanego datasetu niebieskich kwadratów}
+\end{figure}
+
+
+\subsubsection{Architektura modelu}
+Na podstawie przygotowanych danych zbudowano architekturę \textbf{konwolucyjnej sieci neuronowej (CNN)} zaimplementowaną w pliku \texttt{train.py} przy użyciu biblioteki \texttt{TensorFlow/Keras}. Model składa się z trzech kolejnych bloków konwolucyjno–poolingowych:
+\begin{itemize}
+    \item Warstwa \texttt{Conv2D(32, 3x3)} + \texttt{MaxPooling2D} — ekstrakcja prostych cech (krawędzie, linie),
+    \item Warstwa \texttt{Conv2D(64, 3x3)} + \texttt{MaxPooling2D} — wykrywanie złożonych wzorców (kształty),
+    \item Warstwa \texttt{Conv2D(128, 3x3)} + \texttt{MaxPooling2D} — rozpoznawanie złożonych wzorców (całe obiekty).
+\end{itemize}
+Po spłaszczeniu danych (\texttt{Flatten}) sieć zawiera warstwę gęstą \texttt{Dense(128)} z aktywacją ReLU, warstwę \texttt{Dropout(0.3)} ograniczającą przeuczenie oraz warstwę wyjściową \texttt{Dense(6)} z funkcją softmax zwracającą prawdopodobieństwa dla każdej z sześciu klas.
+
+\newpage
+
+\subsubsection{Proces treningu}
+Model został skompilowany z użyciem optymalizatora Adam o współczynniku uczenia $10^{-3}$, funkcji kosztu \texttt{categorical\_crossentropy} oraz metryk \texttt{accuracy} i \texttt{mse}. W projekcie zastosowano mechanizm \texttt{ImageDataGenerator} wyłącznie do automatycznego ładowania obrazów z katalogów \textit{train/val/test} oraz normalizacji wartości pikseli (\texttt{rescale=1./255}). Augmentacja danych została przeniesiona do etapu generowania datasetu, co zapewnia większą kontrolę nad różnorodnością danych.
+
+Trening modelu został zrealizowany w sposób adaptacyjny — sieć trenuje do osiągnięcia minimalnej wymaganej dokładności walidacyjnej wynoszącej 90\% lub do maksymalnej liczby 100 epok (zabezpieczenie przed zbyt długim treningiem). Po każdej epoce system automatycznie zapisuje wykresy przebiegu uczenia (krzywe loss, accuracy oraz MSE) do pliku PNG oraz dane numeryczne do pliku CSV, co umożliwia szczegółową analizę postępów w dostrajaniu modelu.
+
+\section{Przedstawienie wyników wstępnych eksperymentów}
+
+W ramach wstępnych eksperymentów przeprowadzono trening modelu CNN na wygenerowanym syntetycznym zbiorze danych. Model osiągnął wymaganą dokładność walidacyjną wynoszącą 90\% po 14 epokach treningu. 
+
+\subsection{Wyniki na zbiorze testowym}
+Ostateczna ocena modelu na zbiorze testowym (dane, których model nie widział podczas treningu) wykazała następujące wyniki:
+\begin{itemize}
+    \item \textbf{Dokładność (accuracy):} 86.67\%
+    \item \textbf{Funkcja straty (loss):} 0.4559
+    \item \textbf{Błąd średniokwadratowy (MSE):} 0.0343
+\end{itemize}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=1\textwidth]{dane/training_history.png}
+    \caption{Wykresy przebiegu uczenia}
+\end{figure}
+
+\subsection{Analiza wyników}
+Uzyskane wyniki wskazują na dobrą zdolność generalizacji modelu, choć dokładność na zbiorze testowym jest nieco niższa niż na zbiorze walidacyjnym (86.67\% vs 90.56\%). Różnica ta może wynikać z naturalnej zmienności danych testowych oraz z faktu, że model został zatrzymany po osiągnięciu progu na zbiorze walidacyjnym, co mogło prowadzić do lekkiego przeuczenia na tym zbiorze.
+
+Wizualizacje przebiegu treningu (dostępne w pliku \texttt{models/training\_history.png}) oraz szczegółowe dane numeryczne (w pliku \texttt{models/training\_history.csv}) pozwalają na dalszą analizę dynamiki uczenia się modelu i identyfikację potencjalnych obszarów do optymalizacji.
+
+\newpage
+
+\subsection{Kierunki dalszych prac}
+W kolejnych etapach projektu planowane jest:
+\begin{itemize}
+    \item analiza szczegółowa wyników treningu w celu identyfikacji klas, które są najtrudniejsze do rozpoznania,
+    \item rozszerzenie datasetu o dodatkowe klasy obiektów lub warianty wizualne.
+    \item przeprowadzanie dalszych eksperymentów, dla różnych poziomów zaszumień, zniekształceń, rozmyć, zmian jasności i kontrastu, w celu symulowania różych warunków oświetleniowych
+    \item testowanie modelu na rzeczywistych zdjęciach obiektów,
+    \item mieszanie sztucznych danych z realnymi zdjęciami w różnych proporcjach w zbiorze danych treningowych, i badanie korelacji ich stężenia z jakością wyuczonego modelu.
+\end{itemize}
+
+
+
+\section{Literatura}
+
+\begin{enumerate}
+ \item Wang, Z., Zhang, L., \& Chen, Y. (2024). A Comprehensive Survey on Data Augmentation. \textit{arXiv preprint arXiv:2405.09591}. Dostęp online: \url{https://arxiv.org/pdf/2405.09591}
+
+    \item Fleuret, F. (2024). The Little Book of Deep Learning. \textit{University of Geneva}. Dostęp online: \url{https://fleuret.org/public/lbdl.pdf}
+
+    \item Przybyszewski, P. (2020). Sieci neuronowe w przetwarzaniu obrazów. W: Z. Sosnowski (red.), \textit{Symulacje komputerowe w nauce i technice} (s. 235–248). Oficyna Wydawnicza Politechniki Białostockiej. Dostęp online: \url{https://pb.edu.pl/oficyna-wydawnicza/wp-content/uploads/sites/4/2020/11/pod-red-Z-Sosnowskiego-Symulacje-rozdz-13.pdf}
+
+    \item Mikołajczyk-Bareła, A., Ferlin, M., \& Grochowski, M. (2025). Targeted data augmentation for improving model robustness. \textit{International Journal of Applied Mathematics and Computer Science}, 35(1), 157–170. Dostęp online: \url{https://zbc.uz.zgora.pl/repozytorium/Content/87223/AMCS_2025_35_1_11.pdf}
+
+    \item Gramacka, W. (2023). Wykorzystanie wstępnie wytrenowanych konwolucyjnych sieci neuronowych w zagadnieniu transferu stylu. \textit{Zeszyty Naukowe WWSI}, 29, 45–55. Dostęp online: \url{https://zeszyty-naukowe.wwsi.edu.pl/zeszyty/zeszyt29/Weronika_Gramacka.pdf}
+
+    \item Shorten, C., \& Khoshgoftaar, T. M. (2019). A survey on Image Data Augmentation for Deep Learning. \textit{Journal of Big Data}, 6(1), 1–48. Dostęp online: \url{https://www.mdpi.com/2313-433X/9/2/46}
+
+    \item Dovbnych, M., \& Plechawska-Wójcik, M. (2021). A comparison of conventional and deep learning methods of image classification. \textit{Journal of Computer Sciences Institute}, 21, 303–308. Dostęp online: \url{https://oaji.net/pdf.html?n=2022/11438-1664346804.pdf}
+
+    \item Cao, C., Zhou, F., Dai, Y., Wang, J., \& Zhang, K. (2022). A Survey of Mix-based Data Augmentation: Taxonomy, Methods, Applications, and Explainability. \textit{arXiv preprint arXiv:2212.10888}. Dostęp online: \url{https://arxiv.org/pdf/2212.10888}
+
+
+
+\end{enumerate}
+
+\section{Repozytorium GitHub}
+
+Na potrzeby projektu zostało utworzone repozytorium, w którym będzie przechowywany kod źródłowy, dane symulacyjne oraz dokumentacja systemu.
+\\
+\textbf{Link do repozytorium: https://github.com/JustynaSz02/AlgorytmySztucznejInteligencjiPrzemysl/tree/Jus}
+
+
+\end{document}

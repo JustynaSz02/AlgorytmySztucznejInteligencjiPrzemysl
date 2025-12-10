@@ -48,7 +48,7 @@ venv.bak/
 # models/checkpoints/
 
 # Dane - cały folder data jest ignorowany
-data/
+data/*/*/*.png
 
 # Logi i cache
 *.log
